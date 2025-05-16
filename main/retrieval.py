@@ -149,7 +149,7 @@ Context:
 User query: {query}
 
 """
-    model = gen.GenerativeModel("gemini-pro")
+    model = gen.GenerativeModel("models/gemini-1.5-pro")
     response = model.generate_content(prompt)
 
     return response.text

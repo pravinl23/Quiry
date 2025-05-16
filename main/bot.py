@@ -4,6 +4,11 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from database import store_message, get_server_db
 from retrieval import generate_response
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+
+executor = ThreadPoolExecutor()
 
 # Load environment variables (the hidden stuff)
 load_dotenv()
@@ -69,13 +74,21 @@ async def on_message(message):
 # Fetches recent messages and searches for an answer.
 @bot.tree.command(name="ask", description="Ask me anything about this server!")
 async def ask(interaction: discord.Interaction, question: str):
-    await interaction.response.defer()
-   
+    # Defer the response immediately to prevent timeout
+    await interaction.response.defer(thinking=True)  
+
     server_id = interaction.guild.id
-    response = generate_response(question, server_id) 
+
+    try:
+        # Run generate_response in an executor to prevent blocking
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(executor, generate_response, question, server_id)
+
+        # Send follow-up message once the response is ready
+        await interaction.followup.send(response)
     
-    # Once the response is ready send a follow-up
-    await interaction.followup.send(response)
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
 
 # This function is for admins to clear messages from their servers database, in case of a reset of data, privacy reasons, or if spam is detected
 @bot.tree.command(name="clear", description="Clear X amount of recent messages from the database")
