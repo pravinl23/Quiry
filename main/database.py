@@ -1,13 +1,14 @@
 import os
 import certifi
-import google.generativeai as gen
+# import google.generativeai as gen
+import ollama
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from datetime import datetime
 
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 """
 # Checking if URI is valid 
@@ -18,7 +19,6 @@ if not GEMINI_API_KEY:
 """
 
 mongo_client = MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000)
-gen.configure(api_key=GEMINI_API_KEY)
 
 conversation_buffers = {}
 CHUNK_SIZE = 10
@@ -27,12 +27,8 @@ def get_server_db(server_id):
     return mongo_client[f"discord_server_{server_id}"]
 
 def generate_embedding(text):
-    response = gen.embed_content(
-        model="models/text-embedding-004",
-        content=text,
-        task_type="retrieval_document"
-    )
-    return response["embedding"]
+    response = ollama.embeddings(model='nomic-embed-text', prompt=text)
+    return response['embedding']
 
 
 # Merge the messages in the buffer into one, and add it to the mongoDB database

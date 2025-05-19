@@ -2,7 +2,7 @@ import os
 import certifi
 import numpy as np
 import faiss
-import google.generativeai as gen
+import ollama
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from math import sqrt
@@ -10,12 +10,8 @@ from database import get_server_db, generate_embedding
 
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 mongo_client = MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000)
-
-# Configure Google Gemini API
-gen.configure(api_key=GEMINI_API_KEY)
 
 CHECK_COSINE_SIMILARITY = True
 
@@ -106,7 +102,7 @@ def search_similar_messages(query, index, all_docs, text_map, top_k=5):
         return top_texts
 
 
-# Generates response using Gemini Pro
+# Generates response using Ollama
 def generate_response(query, server_id, top_k=5):
     # Load existing embeddings into FAISS
     index, all_docs, text_map = load_embeddings(server_id)
@@ -116,7 +112,6 @@ def generate_response(query, server_id, top_k=5):
     # Get the top_k chunks
     relevant_chunks = search_similar_messages(query, index, all_docs, text_map, top_k=top_k)
     
-    #print(relevant_chunks)
     if not relevant_chunks:
         context = "No similar messages were found in the database."
     else:
@@ -128,7 +123,7 @@ Example: If the user asks, "Who's mom bakes like a champion?" and the context in
 "pppravin's mom bakes like a champion."
 
 If the context does not contain sufficient information to answer the query, or if the context is ambiguous, respond with:
-"I’m sorry, I cannot find that information."
+"I'm sorry, I cannot find that information."
 
 For any additional details requested by the user, provide a short and direct answer based solely on the context. Avoid adding unnecessary information or speculation.
 
@@ -147,9 +142,6 @@ Context:
 {context}
 
 User query: {query}
-
 """
-    model = gen.GenerativeModel("models/gemini-1.5-pro")
-    response = model.generate_content(prompt)
-
-    return response.text
+    response = ollama.generate(model='qwen2.5-3b', prompt=prompt)
+    return response['response']
