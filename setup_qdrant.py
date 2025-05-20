@@ -11,11 +11,11 @@ def setup_qdrant_collection():
     except Exception:
         pass
     
-    # Create collection
+    # Create collection with nomic-embed-text vector size (768)
     client.create_collection(
         collection_name="message_embeddings",
         vectors_config=models.VectorParams(
-            size=1536,
+            size=768,  # nomic-embed-text model vector size
             distance=models.Distance.COSINE
         )
     )

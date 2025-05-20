@@ -4,7 +4,8 @@ from typing import List, Dict, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from qdrant_client import QdrantClient
-import openai
+from qdrant_client.http import models
+import ollama
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -19,15 +20,11 @@ pg_conn = psycopg2.connect(
     port="5432"
 )
 qdrant_client = QdrantClient("localhost", port=6333)
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def generate_embedding(text: str) -> list:
-    """Generate embedding using OpenAI's API."""
-    response = openai.Embedding.create(
-        input=text,
-        model="text-embedding-3-small"
-    )
-    return response['data'][0]['embedding']
+    """Generate embedding using Ollama's nomic-embed-text model."""
+    response = ollama.embeddings(model='nomic-embed-text', prompt=text)
+    return response['embedding']
 
 def search_messages(
     query: str,
