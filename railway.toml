@@ -1,0 +1,2 @@
+[build]
+start = "python main.py"
