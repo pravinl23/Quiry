@@ -1,4 +1,6 @@
 .env
-venv/
-__pycache__
+.venv/
+main/__pycache__
 *.py[cod]
+*.cpython-312.pyc
+.DS_Store

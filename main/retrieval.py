@@ -1,58 +1,39 @@
 import os
-import certifi
 import numpy as np
 import faiss
 import google.generativeai as gen
-from pymongo import MongoClient
 from dotenv import load_dotenv
 from math import sqrt
 from database import get_server_db, generate_embedding
 
 load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-mongo_client = MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000)
 
 # Configure Google Gemini API
 gen.configure(api_key=GEMINI_API_KEY)
 
 CHECK_COSINE_SIMILARITY = True
 
-
-# Load embeddings from MongoDB and initializes FAISS searching
+# Load embeddings from Supabase and initializes FAISS searching
 def load_embeddings(server_id):
-    db = get_server_db(server_id)
-    collection = db["messages"]
+    messages = get_server_db(server_id)
 
-    # Retrieve all messages from the database, including only necessary fields
-    cursor = collection.find(
-        {},
-        {
-            "_id": 1,
-            "embedding": 1,
-            "text_message": 1
-        }
-    )
-    all_messages = list(cursor)
-
-    if not all_messages:
+    if not messages:
         return None, None, None
 
     # Build an array of embeddings
-    embeddings = np.array([doc["embedding"] for doc in all_messages], dtype=np.float32)
-    message_text_mapping = {str(doc["_id"]): doc["text_message"] for doc in all_messages}
+    embeddings = np.array([doc["embedding"] for doc in messages], dtype=np.float32)
+    message_text_mapping = {str(doc["id"]): doc["text_message"] for doc in messages}
 
     # Build the FAISS index
     embedding_dimension = embeddings.shape[1]
     index = faiss.IndexFlatL2(embedding_dimension)
     index.add(embeddings)
 
-    return index, all_messages, message_text_mapping
+    return index, messages, message_text_mapping
 
 # Uses FAISS to find vectors that are the most similar to eachother.
 def search_similar_messages(query, index, all_docs, text_map, top_k=5):
-    
     if index is None:
         return []
 
@@ -79,7 +60,6 @@ def search_similar_messages(query, index, all_docs, text_map, top_k=5):
         def cosine_sim(query_vec, doc_vec):
             dot_val = sum(q*d for q, d in zip(query_vec, doc_vec))
             doc_norm = sqrt(sum(d*d for d in doc_vec))
-            #print(dot_val / (query_norm * doc_norm + 1e-9)
             return dot_val / (query_norm * doc_norm + 1e-9)
 
         scored_candidates = []
@@ -94,17 +74,16 @@ def search_similar_messages(query, index, all_docs, text_map, top_k=5):
         # Extract top_k text
         top_texts = []
         for cand_doc, _ in scored_candidates[:top_k]:
-            msg_id = str(cand_doc["_id"])
+            msg_id = str(cand_doc["id"])
             top_texts.append(text_map[msg_id])
         return top_texts
     else:
         # No cosine similarity, then just approximate order from FAISS
         top_texts = []
         for doc in candidates:
-            msg_id = str(doc["_id"])
+            msg_id = str(doc["id"])
             top_texts.append(text_map[msg_id])
         return top_texts
-
 
 # Generates response using Gemini Pro
 def generate_response(query, server_id, top_k=5):
@@ -116,7 +95,6 @@ def generate_response(query, server_id, top_k=5):
     # Get the top_k chunks
     relevant_chunks = search_similar_messages(query, index, all_docs, text_map, top_k=top_k)
     
-    #print(relevant_chunks)
     if not relevant_chunks:
         context = "No similar messages were found in the database."
     else:
@@ -128,7 +106,7 @@ Example: If the user asks, "Who's mom bakes like a champion?" and the context in
 "pppravin's mom bakes like a champion."
 
 If the context does not contain sufficient information to answer the query, or if the context is ambiguous, respond with:
-"I’m sorry, I cannot find that information."
+"I'm sorry, I cannot find that information."
 
 For any additional details requested by the user, provide a short and direct answer based solely on the context. Avoid adding unnecessary information or speculation.
 

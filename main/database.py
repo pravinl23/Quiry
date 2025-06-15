@@ -1,30 +1,24 @@
 import os
-import certifi
 import google.generativeai as gen
-from pymongo import MongoClient
-from dotenv import load_dotenv
 from datetime import datetime
+from dotenv import load_dotenv
+from supabase import create_client, Client
 
 load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-"""
-# Checking if URI is valid 
-if not MONGO_URI:
-    raise ValueError("MONGO_URI not found")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Supabase credentials not found in .env")
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not found")
-"""
+    raise ValueError("Gemini API key not found in .env")
 
-mongo_client = MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 gen.configure(api_key=GEMINI_API_KEY)
 
 conversation_buffers = {}
 CHUNK_SIZE = 10
-
-def get_server_db(server_id):
-    return mongo_client[f"discord_server_{server_id}"]
 
 def generate_embedding(text):
     response = gen.embed_content(
@@ -34,62 +28,58 @@ def generate_embedding(text):
     )
     return response["embedding"]
 
-
-# Merge the messages in the buffer into one, and add it to the mongoDB database
-def merge_conversation(server_id, channel_id, category, buffer_key):
-
-    message_list = conversation_buffers.get(buffer_key, [])
+def get_server_db(server_id):
+    """Get messages for a specific server from Supabase"""
+    response = supabase.table("message_chunks")\
+        .select("*")\
+        .eq("server_id", str(server_id))\
+        .order("timestamp", desc=True)\
+        .execute()
     
-    # Loop through each message in the buffer
+    if hasattr(response, "error") and response.error:
+        print("❌ Error fetching from Supabase:", response.error)
+        return []
+    
+    return response.data
+
+def merge_conversation(server_id, channel_id, category, buffer_key):
+    message_list = conversation_buffers.get(buffer_key, [])
     conversation_lines = []
+
     for msg in message_list:
-        # Format the time
-        if isinstance(msg["timestamp"], datetime):
-            ts_str = msg["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            ts_str = str(msg["timestamp"])
-        # Example export: "pppravin" user_id: 3948390258081581 at timestamp: 3:45 said: hi how are you!
+        ts_str = msg["timestamp"].strftime("%Y-%m-%d %H:%M:%S") if isinstance(msg["timestamp"], datetime) else str(msg["timestamp"])
         conversation_lines.append(
-            f"{msg['author']} (user_id: {msg['user_id']}) at timestamp:{ts_str} said: {msg['content']}"
+            f"{msg['author']} (user_id: {msg['user_id']}) at {ts_str} said: {msg['content']}"
         )
 
     text_message = "\n".join(conversation_lines)
-
-    # Embed the chunk as one text message
     embedding = generate_embedding(text_message)
 
-    db = get_server_db(server_id)
-    collection = db["messages"]
-
-    # Get the earliest timestamp for timestamp
     earliest_ts = message_list[0]["timestamp"] if message_list else datetime.utcnow()
 
     chunk_doc = {
-        "server_id": server_id,
+        "server_id": str(server_id),
         "channel_id": channel_id,
         "text_message": text_message,
         "embedding": embedding,
-        "timestamp": earliest_ts,
+        "timestamp": earliest_ts.isoformat(),
         "category": category,
         "message_count": len(message_list),
     }
-    collection.insert_one(chunk_doc)
 
-    # Clear the buffer for this server and channel
+    response = supabase.table("message_chunks").insert(chunk_doc).execute()
+    if hasattr(response, "error") and response.error:
+        print("❌ Error inserting into Supabase:", response.error)
+
     conversation_buffers[buffer_key] = []
 
-# Stores messages into the conversation buffer
-'''***Need to implement filter for harmful words***'''
 def store_message(server_id, author, user_id, content, category, channel, server, timestamp):
-    # Ignore whitespaces
     if not content.strip():
         return
 
-    # Channel ID is a unique number to the specific channel in that specific server 
     channel_id = str(channel.id)
     buffer_key = (server_id, channel_id)
 
-    # Initialize conversation buffer
     if buffer_key not in conversation_buffers:
         conversation_buffers[buffer_key] = []
 
@@ -102,8 +92,5 @@ def store_message(server_id, author, user_id, content, category, channel, server
         "server": server
     })
 
-    # Check if the number of messages in the buffer has reached or exceeded the CHUNK_SIZE.
     if len(conversation_buffers[buffer_key]) >= CHUNK_SIZE:
-        #print("Buffer reached CHUNK_SIZE for", buffer_key, "- flushing chunk")
-        # Now combine the buffer into one message to store on mongodb
         merge_conversation(server_id, channel_id, category, buffer_key)
