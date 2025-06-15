@@ -4,7 +4,7 @@ import faiss
 from openai import OpenAI
 from dotenv import load_dotenv
 from math import sqrt
-from database import get_server_db, generate_embedding
+from main.database import get_server_db, generate_embedding
 from datetime import datetime
 
 # Load environment variables

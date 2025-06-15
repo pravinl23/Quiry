@@ -2,9 +2,8 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from database import supabase
-from database import store_message
-from retrieval import generate_response
+from main.database import supabase, store_message
+from main.retrieval import generate_response
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
