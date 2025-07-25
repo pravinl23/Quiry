@@ -12,7 +12,7 @@ executor = ThreadPoolExecutor()
 
 # Load environment variables (the hidden stuff)
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("")
 
 # Check for possible error source
 if not TOKEN:

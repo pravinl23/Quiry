@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import faiss
-from openai import OpenAI
+import google.generativeai as gen
 from dotenv import load_dotenv
 from math import sqrt
 from main.database import get_server_db, generate_embedding
@@ -9,10 +9,9 @@ from datetime import datetime
 
 # Load environment variables
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+gen.configure("GEMINI_API_KEY")
 
 '''
 # Test OpenAI connection with a sample request
