@@ -19,6 +19,24 @@ A Discord bot that provides AI-powered conversation search and retrieval capabil
    - Efficient vector similarity search with FAISS
    - Real-time message processing and embedding generation
 
+> **Create the `message_chunks` table in Supabase:**
+>
+> ```sql
+> create table message_chunks (
+>     id uuid primary key default gen_random_uuid(),
+>     server_id text,
+>     channel_id text,
+>     text_message text,
+>     embedding vector(768), -- If you have the vector extension enabled
+>     timestamp timestamp,
+>     category text,
+>     message_count integer
+> );
+> ```
+>
+> - If you don’t have the `vector` extension enabled, use a different type for `embedding` (e.g., `float8[]`).
+> - Run this SQL in the Supabase dashboard’s SQL Editor.
+
 ## How It Works
 
 1. **Message Collection**
@@ -27,13 +45,12 @@ A Discord bot that provides AI-powered conversation search and retrieval capabil
    - Each chunk maintains metadata including server, channel, and timestamp information
 
 2. **Ask Questions**
-   - Use the `/ask` command to retrieve contextually similar past conversations
+   - Use the `/asking` command to retrieve contextually similar past conversations
    - Quiry's advanced RAG system provides intelligent responses based on your server's history
 
 3. **Admin Commands**
-   - **`/clear X`** – Remove the most recent X messages from your server's database (useful for data reset or privacy)
+   - **`/clearing X`** – Remove the most recent X messages from your server's database (useful for data reset or privacy)
    - **`/invite`** – Get the bot's invite link
-
 ---
 
 ## Adding Quiry to Your Server

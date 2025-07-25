@@ -12,7 +12,7 @@ executor = ThreadPoolExecutor()
 
 # Load environment variables (the hidden stuff)
 load_dotenv()
-TOKEN = os.getenv("")
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Check for possible error source
 if not TOKEN:
@@ -72,10 +72,10 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # Fetches recent messages and searches for an answer.
-@bot.tree.command(name="ask", description="Ask me anything about this server!")
-async def ask(interaction: discord.Interaction, question: str):
+@bot.tree.command(name="asking", description="Ask me anything about this server!")
+async def asking(interaction: discord.Interaction, question: str):
     # Defer the response immediately to prevent timeout
-    await interaction.response.defer(thinking=True)  
+    await interaction.response.defer(thinking=True, ephemeral=True)  
 
     server_id = interaction.guild.id
 
@@ -91,9 +91,9 @@ async def ask(interaction: discord.Interaction, question: str):
         await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
 
 # This function is for admins to clear messages from their servers database, in case of a reset of data, privacy reasons, or if spam is detected
-@bot.tree.command(name="clear", description="Clear X amount of recent messages from the database")
+@bot.tree.command(name="clearing", description="Clear X amount of recent messages from the database")
 async def clear(interaction: discord.Interaction, count: int):
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
@@ -101,12 +101,16 @@ async def clear(interaction: discord.Interaction, count: int):
     server_id = str(interaction.guild.id)
 
     # Fetch latest N chunks for this server
-    response = supabase.table("message_chunks")\
-        .select("id")\
-        .eq("server_id", server_id)\
-        .order("timestamp", desc=True)\
-        .limit(count)\
-        .execute()
+    try:    
+        response = supabase.table("message_chunks")\
+            .select("id")\
+            .eq("server_id", server_id)\
+            .order("timestamp", desc=True)\
+            .limit(count)\
+            .execute()
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
+        return
 
     if not response.data:
         await interaction.followup.send("No messages found to clear.", ephemeral=True)

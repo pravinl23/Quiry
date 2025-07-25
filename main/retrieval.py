@@ -9,9 +9,10 @@ from datetime import datetime
 
 # Load environment variables
 load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Initialize OpenAI client
-gen.configure("GEMINI_API_KEY")
+# Initialize Gemini client
+gen.configure(api_key=GEMINI_API_KEY)
 
 '''
 # Test OpenAI connection with a sample request
