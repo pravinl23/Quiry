@@ -91,9 +91,9 @@ async def asking(interaction: discord.Interaction, question: str):
         await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
 
 # This function is for admins to clear messages from their servers database, in case of a reset of data, privacy reasons, or if spam is detected
-@bot.tree.command(name="clearing", description="Clear X amount of recent messages from the database")
+@bot.tree.command(name="clear", description="Clear X amount of recent messages from the database")
 async def clear(interaction: discord.Interaction, count: int):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer()
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
@@ -101,16 +101,12 @@ async def clear(interaction: discord.Interaction, count: int):
     server_id = str(interaction.guild.id)
 
     # Fetch latest N chunks for this server
-    try:    
-        response = supabase.table("message_chunks")\
-            .select("id")\
-            .eq("server_id", server_id)\
-            .order("timestamp", desc=True)\
-            .limit(count)\
-            .execute()
-    except Exception as e:
-        await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
-        return
+    response = supabase.table("message_chunks")\
+        .select("id")\
+        .eq("server_id", server_id)\
+        .order("timestamp", desc=True)\
+        .limit(count)\
+        .execute()
 
     if not response.data:
         await interaction.followup.send("No messages found to clear.", ephemeral=True)
@@ -126,7 +122,27 @@ async def clear(interaction: discord.Interaction, count: int):
 
     await interaction.followup.send(f"Deleted {len(ids)} message chunks from the database.", ephemeral=True)
 
+# Fetches a certain number of messages
+@bot.tree.command(name="fetch", description="Fetch all previous messages from this server and store them")
+async def fetch(interaction: discord.Interaction, count: int):
+    await interaction.response.defer()
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("You do not have permission to use this command.", ephemeral=True)
+        return
 
+    server_id = interaction.guild.id
+    
+    await interaction.followup.send(f"🔄 Starting to fetch up to {count} messages per channel from this server. This may take a while...", ephemeral=True)
+    
+    try:
+        from main.database import fetch_server_history
+        await fetch_server_history(bot, server_id, count)
+        await interaction.followup.send("✅ Server history fetch completed! All messages have been stored in the database.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error fetching server history: {e}", ephemeral=True)
+
+#Fetches all the messages sent
+@bot.tree.command(name="Fetch-all")
 @bot.tree.command(name="invite", description="Get the bot's invite link!")
 async def invite(interaction: discord.Interaction):
     invite_link = "https://discord.com/oauth2/authorize?client_id=1340139928994189322&permissions=8&integration_type=0&scope=bot"
