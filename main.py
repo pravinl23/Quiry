@@ -6,6 +6,8 @@ from main.database import supabase, store_message
 from main.retrieval import generate_response
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from main.database import fetch_server_history
+
 
 
 executor = ThreadPoolExecutor()
@@ -63,7 +65,7 @@ async def on_message(message):
         user_id=message.author.id,
         content=message.content,
         category=category,
-        channel=message.channel,  # <-- pass channel object instead of string
+        channel=message.channel,  
         server=str(message.guild.name),
         timestamp=message.created_at
     )
@@ -109,7 +111,7 @@ async def clear(interaction: discord.Interaction, count: int):
         .execute()
 
     if not response.data:
-        await interaction.followup.send("No messages found to clear.", ephemeral=True)
+        await interaction.followup.send("No messages found to clear.")
         return
 
     ids = [chunk["id"] for chunk in response.data]
@@ -135,14 +137,24 @@ async def fetch(interaction: discord.Interaction, count: int):
     await interaction.followup.send(f"🔄 Starting to fetch up to {count} messages per channel from this server. This may take a while...", ephemeral=True)
     
     try:
-        from main.database import fetch_server_history
         await fetch_server_history(bot, server_id, count)
         await interaction.followup.send("✅ Server history fetch completed! All messages have been stored in the database.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error fetching server history: {e}", ephemeral=True)
 
 #Fetches all the messages sent
-@bot.tree.command(name="Fetch-all")
+@bot.tree.command(name="fetch-all", description="Fetch all messages from this server and store them **Warning** This might take a very long time")
+async def fetch_all(interaction: discord.Interaction):
+    await interaction.response.defer()
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("You do not have permission to use this command.", ephemeral=True)
+        return
+    server_id = interaction.guild.id
+    try:
+        await fetch_server_history(bot, server_id, None) 
+        await interaction.followup.send("✅ All messages have been fetched and stored in the database.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error fetching server history: {e}", ephemeral=True)
 @bot.tree.command(name="invite", description="Get the bot's invite link!")
 async def invite(interaction: discord.Interaction):
     invite_link = "https://discord.com/oauth2/authorize?client_id=1340139928994189322&permissions=8&integration_type=0&scope=bot"

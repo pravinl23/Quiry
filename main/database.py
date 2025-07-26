@@ -52,7 +52,7 @@ def get_server_db(server_id):
 
     return response.data
 
-async def fetch_server_history(bot, server_id, limit=1000):
+async def fetch_server_history(bot, server_id, limit):
     """
     Fetch all previous messages from a Discord server and store them in chunks.
     
