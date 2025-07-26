@@ -35,7 +35,7 @@ async def on_ready():
 
 
 @bot.event
-# Handles incoming messages, stores them in the mongodb database with category tracking
+# Handles incoming messages, stores them in the supabase database with category tracking
 async def on_message(message):
     # Ignore messages from the bot itself or DMs to the bot
     if message.author == bot.user or not message.guild:

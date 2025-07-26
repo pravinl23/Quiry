@@ -39,10 +39,11 @@ def get_server_db(server_id):
     if hasattr(response, "error") and response.error:
         print("❌ Error fetching from Supabase:", response.error)
         return []
-    
+    print(f'response.data: {response.data}')
     return response.data
 
 def merge_conversation(server_id, channel_id, category, buffer_key):
+    """Merge a conversation into a single message and store it in Supabase"""
     message_list = conversation_buffers.get(buffer_key, [])
     conversation_lines = []
 
@@ -54,6 +55,7 @@ def merge_conversation(server_id, channel_id, category, buffer_key):
 
     text_message = "\n".join(conversation_lines)
     embedding = generate_embedding(text_message)
+    print(f'embedding: {embedding}')
 
     earliest_ts = message_list[0]["timestamp"] if message_list else datetime.utcnow()
 
@@ -61,15 +63,17 @@ def merge_conversation(server_id, channel_id, category, buffer_key):
         "server_id": str(server_id),
         "channel_id": channel_id,
         "text_message": text_message,
-        "embedding": embedding,
+        "embedding": list(embedding),
         "timestamp": earliest_ts.isoformat(),
         "category": category,
         "message_count": len(message_list),
     }
-
-    response = supabase.table("message_chunks").insert(chunk_doc).execute()
-    if hasattr(response, "error") and response.error:
-        print("❌ Error inserting into Supabase:", response.error)
+    try:
+        response = supabase.table("message_chunks").insert(chunk_doc).execute()
+        if hasattr(response, "error") and response.error:
+            print("❌ Error inserting into Supabase:", response.error)
+    except Exception as e:
+        print("❌ Error inserting into Supabase:", e)
 
     conversation_buffers[buffer_key] = []
 
@@ -94,3 +98,6 @@ def store_message(server_id, author, user_id, content, category, channel, server
 
     if len(conversation_buffers[buffer_key]) >= CHUNK_SIZE:
         merge_conversation(server_id, channel_id, category, buffer_key)
+        print("✅ Conversation merged and stored in Supabase")
+    else:
+        print(f"did not merge, {len(conversation_buffers[buffer_key])} messages in buffer")

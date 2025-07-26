@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from math import sqrt
 from main.database import get_server_db, generate_embedding
 from datetime import datetime
+import json
 
 # Load environment variables
 load_dotenv()
@@ -30,19 +31,38 @@ CHECK_COSINE_SIMILARITY = True
 
 # Load embeddings from Supabase and initializes FAISS searching
 def load_embeddings(server_id):
+    print(f"Loading embeddings for server {server_id}")
     messages = get_server_db(server_id)
+    print(f"Messages: {messages}")
 
     if not messages:
         return None, None, None
 
-    # Build an array of embeddings
-    embeddings = np.array([doc["embedding"] for doc in messages], dtype=np.float32)
+    # Build an array of embeddings with proper error handling
+    try:
+        embeddings = np.array([float(doc["embedding"]) for doc in messages], dtype=np.float32)
+        print(embeddings)
+        print(f"Embeddings shape: {embeddings.shape}")
+        
+        # Check if embeddings have correct dimension
+        if embeddings.shape[1] != 768:
+            print(f"Warning: Expected 768 dimensions, got {embeddings.shape[1]}")
+            
+    except Exception as e:
+        print(f"Error creating embeddings array: {e}")
+        print("This likely means embeddings are stored as strings, not vectors")
+        return None, None, None
+
     message_text_mapping = {str(doc["id"]): doc["text_message"] for doc in messages}
 
     # Build the FAISS index
     embedding_dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(embedding_dimension)
-    index.add(embeddings)
+    try:
+        index = faiss.IndexFlatL2(embedding_dimension)
+        index.add(embeddings)
+    except Exception as e:
+        print(f"Error building FAISS index: {e}")
+        return None, None, None
 
     return index, messages, message_text_mapping
 
@@ -52,11 +72,20 @@ def search_similar_messages(query, index, all_docs, text_map, top_k=5):
         return []
 
     # Embed the query using OpenAI
-    query_embedding = generate_embedding(query)
+    try:
+        query_embedding = generate_embedding(query)
+    except Exception as e:
+        print(f"Error embedding query: {e}")
+        return []
+    
     query_embedding_np = np.array([query_embedding], dtype=np.float32)
 
     # FAISS the top_k most similar vectors
-    distances, indices = index.search(query_embedding_np, top_k)
+    try:
+        distances, indices = index.search(query_embedding_np, top_k)
+    except Exception as e:
+        print(f"Error searching for similar messages: {e}")
+        return []
 
     candidates = []
     for index in indices[0]:
@@ -77,10 +106,15 @@ def search_similar_messages(query, index, all_docs, text_map, top_k=5):
             return dot_val / (query_norm * doc_norm + 1e-9)
 
         scored_candidates = []
+
         for c in candidates:
             doc_embedding = c["embedding"]
             score = cosine_sim(query_embedding, doc_embedding)
-            scored_candidates.append((c, score))
+            try:
+                scored_candidates.append((c, score))
+            except Exception as e:
+                print(f"Error adding candidate: {e}")
+                return []
 
         # Sort by descending similarity
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -88,8 +122,12 @@ def search_similar_messages(query, index, all_docs, text_map, top_k=5):
         # Extract top_k text
         top_texts = []
         for cand_doc, _ in scored_candidates[:top_k]:
-            msg_id = str(cand_doc["id"])
-            top_texts.append(text_map[msg_id])
+            try:
+                msg_id = str(cand_doc["id"])
+                top_texts.append(text_map[msg_id])
+            except Exception as e:
+                print(f"Error adding candidate: {e}")
+                return []
         return top_texts
     else:
         # No cosine similarity, then just approximate order from FAISS
@@ -102,7 +140,12 @@ def search_similar_messages(query, index, all_docs, text_map, top_k=5):
 # Generates response using GPT-3.5-turbo
 def generate_response(query, server_id, top_k=5):
     # Load existing embeddings into FAISS
-    index, all_docs, text_map = load_embeddings(server_id)
+    try:
+        index, all_docs, text_map = load_embeddings(server_id)
+    except Exception as e:
+        print(f"Error loading embeddings 1: {e}")
+        return "No relevant messages have been indexed for this server yet."
+    
     if index is None:
         return "No relevant messages have been indexed for this server yet."
 
@@ -151,8 +194,8 @@ Context:
 User question:
 {query}
 """
-    response = client.chat.completions.create(
-        model="gpt-4o",
+    response = gen.generate_content(
+        model="gemini-1.5-flash",
         messages=[
             {"role": "system", "content": "You are Quiry, an AI assistant that answers questions about Discord server conversations."},
             {"role": "user", "content": prompt}
