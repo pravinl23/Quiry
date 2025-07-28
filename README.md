@@ -2,6 +2,8 @@
 
 A Discord bot that provides AI-powered conversation search and retrieval capabilities. Built with Python, discord.py, Supabase, FAISS, and the Google Generative AI (Gemini API), Quiry leverages high-dimensional vector embeddings to enable Retrieval-Augmented Generation (RAG) for dynamic, context-driven responses.
 
+[Demo Link](https://drive.google.com/drive/folders/1T_V62wNuizL0khFhPLD4ojrpQAK0_jVh?usp=sharing)
+
 ## Features
 
 1. **Real-time Message Processing**
