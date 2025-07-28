@@ -2,7 +2,7 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from main.database import supabase, store_message
+from main.database import supabase, store_message, clear_server_db, clear_all_db
 from main.retrieval import generate_response
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -134,7 +134,7 @@ async def fetch(interaction: discord.Interaction, count: int):
 
     server_id = interaction.guild.id
     
-    await interaction.followup.send(f"🔄 Starting to fetch up to {count} messages per channel from this server. This may take a while...", ephemeral=True)
+    await interaction.followup.send(f"🔄 Starting to fetch up to {count} messages per channel from this server. Give me a second...", ephemeral=True)
     
     try:
         await fetch_server_history(bot, server_id, count)
@@ -150,11 +150,38 @@ async def fetch_all(interaction: discord.Interaction):
         await interaction.followup.send("You do not have permission to use this command.", ephemeral=True)
         return
     server_id = interaction.guild.id
+    
+    await interaction.followup.send("🗑️ Clearing existing database entries for this server...", ephemeral=True)
+    
     try:
+        # Clear existing data for this server
+        if not clear_server_db(server_id):
+            await interaction.followup.send("❌ Failed to clear existing database entries. Aborting fetch operation.", ephemeral=True)
+            return
+        
+        await interaction.followup.send("🔄 Starting to fetch all messages from this server. This may take a very long time...", ephemeral=True)
+        
         await fetch_server_history(bot, server_id, None) 
         await interaction.followup.send("✅ All messages have been fetched and stored in the database.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error fetching server history: {e}", ephemeral=True)
+@bot.tree.command(name="clear-all", description="Clear ALL data from both individual and chunked message databases **WARNING: This affects ALL servers**")
+async def clear_all(interaction: discord.Interaction):
+    await interaction.response.defer()
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("You do not have permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.followup.send("🗑️ Starting to clear ALL data from both databases (individual messages and chunks)...", ephemeral=True)
+    
+    try:
+        if clear_all_db():
+            await interaction.followup.send("✅ Successfully cleared ALL data from both databases!\n   - Cleared all message chunks\n   - Cleared all individual messages\n   - All servers affected", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Failed to clear all data from databases. Check console for errors.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error during clear-all operation: {e}", ephemeral=True)
+
 @bot.tree.command(name="invite", description="Get the bot's invite link!")
 async def invite(interaction: discord.Interaction):
     invite_link = "https://discord.com/oauth2/authorize?client_id=1340139928994189322&permissions=8&integration_type=0&scope=bot"

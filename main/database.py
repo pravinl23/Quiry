@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import ast
 import numpy as np
-import discord
 
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -31,26 +30,225 @@ def generate_embedding(text):
     )
     return response["embedding"]
 
+def store_individual_message(server_id, channel_id, author, user_id, content, category, server, timestamp):
+    """Store an individual message in the database"""
+    try:
+        message_doc = {
+            "server_id": str(server_id),
+            "channel_id": str(channel_id),
+            "author": author,
+            "user_id": str(user_id),
+            "content": content,
+            "category": category or "No category",
+            "server": server,
+            "timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+        }
+        
+        response = supabase.table("individual_messages").insert(message_doc).execute()
+        if hasattr(response, "error") and response.error:
+            print(f"❌ Error storing individual message: {response.error}")
+            return False
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error storing individual message: {e}")
+        return False
+
+def get_individual_messages_for_chunk(server_id, channel_id, limit=CHUNK_SIZE):
+    """Get individual messages for creating a chunk"""
+    try:
+        response = supabase.table("individual_messages")\
+            .select("*")\
+            .eq("server_id", str(server_id))\
+            .eq("channel_id", str(channel_id))\
+            .order("timestamp", desc=False)\
+            .limit(limit)\
+            .execute()
+        
+        if hasattr(response, "error") and response.error:
+            print(f"❌ Error fetching individual messages: {response.error}")
+            return []
+        
+        return response.data or []
+        
+    except Exception as e:
+        print(f"❌ Error fetching individual messages: {e}")
+        return []
+
+def delete_individual_messages(message_ids):
+    """Delete individual messages by their IDs"""
+    try:
+        for msg_id in message_ids:
+            response = supabase.table("individual_messages")\
+                .delete()\
+                .eq("id", msg_id)\
+                .execute()
+            
+            if hasattr(response, "error") and response.error:
+                print(f"❌ Error deleting individual message {msg_id}: {response.error}")
+                return False
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error deleting individual messages: {e}")
+        return False
+
+def count_individual_messages(server_id, channel_id):
+    """Count individual messages for a specific server and channel"""
+    try:
+        response = supabase.table("individual_messages")\
+            .select("id", count="exact")\
+            .eq("server_id", str(server_id))\
+            .eq("channel_id", str(channel_id))\
+            .execute()
+        
+        if hasattr(response, "error") and response.error:
+            print(f"❌ Error counting individual messages: {response.error}")
+            return 0
+        
+        return response.count or 0
+        
+    except Exception as e:
+        print(f"❌ Error counting individual messages: {e}")
+        return 0
+
+def clear_all_db():
+    """Clear ALL message chunks and individual messages from both databases (all servers)"""
+    try:
+        print("🗑️ Starting to clear ALL data from both databases...")
+        
+        # Clear all message chunks
+        response1 = supabase.table("message_chunks")\
+            .delete()\
+            .neq("id", 0)\
+            .execute()  # Delete all rows (neq id 0 means all rows since id is never 0)
+        
+        # Clear all individual messages
+        response2 = supabase.table("individual_messages")\
+            .delete()\
+            .neq("id", 0)\
+            .execute()  # Delete all rows
+        
+        if (hasattr(response1, "error") and response1.error) or (hasattr(response2, "error") and response2.error):
+            print(f"❌ Error clearing all databases")
+            if hasattr(response1, "error") and response1.error:
+                print(f"❌ Message chunks error: {response1.error}")
+            if hasattr(response2, "error") and response2.error:
+                print(f"❌ Individual messages error: {response2.error}")
+            return False
+        
+        print(f"🗑️ Successfully cleared ALL data from both databases")
+        print(f"   - Cleared message_chunks table")
+        print(f"   - Cleared individual_messages table")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error clearing all databases: {e}")
+        return False
+
+def clear_server_db(server_id):
+    """Clear all message chunks and individual messages for a specific server from Supabase"""
+    try:
+        # Clear message chunks
+        response1 = supabase.table("message_chunks")\
+            .delete()\
+            .eq("server_id", str(server_id))\
+            .execute()
+        
+        # Clear individual messages
+        response2 = supabase.table("individual_messages")\
+            .delete()\
+            .eq("server_id", str(server_id))\
+            .execute()
+        
+        if (hasattr(response1, "error") and response1.error) or (hasattr(response2, "error") and response2.error):
+            print(f"❌ Error clearing database for server {server_id}")
+            return False
+        
+        print(f"🗑️ Cleared all existing data for server {server_id}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error clearing database for server {server_id}: {e}")
+        return False
+
+def get_individual_messages_for_retrieval(server_id):
+    """Get individual messages that haven't been chunked yet for retrieval"""
+    try:
+        response = supabase.table("individual_messages")\
+            .select("*")\
+            .eq("server_id", str(server_id))\
+            .order("timestamp", desc=False)\
+            .execute()
+        
+        if hasattr(response, "error") and response.error:
+            print(f"❌ Error fetching individual messages: {response.error}")
+            return []
+        
+        return response.data or []
+        
+    except Exception as e:
+        print(f"❌ Error fetching individual messages: {e}")
+        return []
+
 def get_server_db(server_id):
-    """Get messages for a specific server from Supabase"""
-    response = supabase.table("message_chunks")\
+    """Get messages for a specific server from Supabase (chunks + individual messages)"""
+    # Get chunked messages
+    chunks_response = supabase.table("message_chunks")\
         .select("*")\
         .eq("server_id", str(server_id))\
         .order("timestamp", desc=True)\
         .execute()
     
-    if hasattr(response, "error") and response.error:
-        print("❌ Error fetching from Supabase:", response.error)
-        return []
-
-    if response.data:
-        for doc in response.data:
+    if hasattr(chunks_response, "error") and chunks_response.error:
+        print("❌ Error fetching chunks from Supabase:", chunks_response.error)
+        chunks_data = []
+    else:
+        chunks_data = chunks_response.data or []
+    
+    # Process chunk embeddings
+    if chunks_data:
+        for doc in chunks_data:
             if isinstance(doc["embedding"], str):
                 doc["embedding"] = ast.literal_eval(doc["embedding"])
-                print(f'embedding type: {type(doc["embedding"])}')
-        print(f'embedding type: {type(response.data[0]["embedding"])}')
-
-    return response.data
+    
+    # Get individual messages that haven't been chunked yet
+    individual_messages = get_individual_messages_for_retrieval(server_id)
+    
+    # Convert individual messages to chunk-like format for retrieval
+    individual_chunks = []
+    if individual_messages:
+        for msg in individual_messages:
+            # Create a text message in the same format as chunks
+            ts_str = msg["timestamp"] if isinstance(msg["timestamp"], str) else msg["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            text_message = f"{msg['author']} (user_id: {msg['user_id']}) at {ts_str} said: {msg['content']}"
+            
+            # Generate embedding for this individual message
+            try:
+                embedding = generate_embedding(text_message)
+                individual_chunk = {
+                    "id": f"individual_{msg['id']}",  # Prefix to distinguish from chunks
+                    "server_id": msg["server_id"],
+                    "channel_id": msg["channel_id"],
+                    "text_message": text_message,
+                    "embedding": embedding,
+                    "timestamp": msg["timestamp"],
+                    "category": msg["category"],
+                    "message_count": 1
+                }
+                individual_chunks.append(individual_chunk)
+            except Exception as e:
+                print(f"❌ Error generating embedding for individual message: {e}")
+                continue
+    
+    # Combine chunks and individual messages
+    all_messages = chunks_data + individual_chunks
+    
+    print(f"📊 Retrieved {len(chunks_data)} chunks and {len(individual_chunks)} individual messages for server {server_id}")
+    
+    return all_messages
 
 async def fetch_server_history(bot, server_id, limit):
     """
@@ -207,25 +405,83 @@ def store_message(server_id, author, user_id, content, category, channel, server
         return
 
     channel_id = str(channel.id)
-    buffer_key = (server_id, channel_id)
+    
+    # Store the individual message first
+    if not store_individual_message(server_id, channel_id, author, user_id, content, category, server, timestamp):
+        print(f"❌ Failed to store individual message")
+        return
+    
+    # Count how many individual messages we have for this channel
+    message_count = count_individual_messages(server_id, channel_id)
+    print(f"📝 Message stored individually: {message_count}/{CHUNK_SIZE} messages in channel")
+    
+    # If we have reached exactly the chunk size, create a chunk and delete individual messages
+    if message_count == CHUNK_SIZE:
+        # Get the individual messages for this chunk
+        individual_messages = get_individual_messages_for_chunk(server_id, channel_id, CHUNK_SIZE)
+        
+        if len(individual_messages) == CHUNK_SIZE:
+            # Convert individual messages to the format expected by store_message_chunk
+            message_chunk = []
+            message_ids_to_delete = []
+            
+            for msg in individual_messages:  # Take all CHUNK_SIZE messages
+                message_chunk.append({
+                    "author": msg["author"],
+                    "user_id": int(msg["user_id"]),
+                    "content": msg["content"],
+                    "timestamp": datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00')) if isinstance(msg["timestamp"], str) else msg["timestamp"],
+                    "category": msg["category"],
+                    "server": msg["server"]
+                })
+                message_ids_to_delete.append(msg["id"])
+            
+            # Create the chunk synchronously (since we're not in an async context)
+            if create_chunk_from_messages(server_id, channel_id, message_chunk):
+                # Only delete individual messages if chunk creation was successful
+                if delete_individual_messages(message_ids_to_delete):
+                    print(f"✅ Chunk of {CHUNK_SIZE} messages created and {len(message_ids_to_delete)} individual messages wiped from database")
+                else:
+                    print(f"⚠️ Chunk created but failed to wipe some individual messages from database")
+            else:
+                print(f"❌ Failed to create chunk, keeping individual messages")
 
-    # Initialize buffer if it doesn't exist
-    if buffer_key not in conversation_buffers:
-        conversation_buffers[buffer_key] = []
-
-    # Add message to buffer
-    conversation_buffers[buffer_key].append({
-        "author": author,
-        "user_id": user_id,
-        "content": content,
-        "timestamp": timestamp,
-        "category": category or "No category",
-        "server": server
-    })
-
-    # Only store when we have exactly 10 messages
-    if len(conversation_buffers[buffer_key]) == CHUNK_SIZE:
-        merge_conversation(server_id, channel_id, category, buffer_key)
-        print(f"✅ Chunk of {CHUNK_SIZE} messages stored in Supabase")
-    else:
-        print(f"📝 Message buffered: {len(conversation_buffers[buffer_key])}/{CHUNK_SIZE} in chunk")
+def create_chunk_from_messages(server_id, channel_id, message_chunk):
+    """Create a chunk from individual messages (synchronous version)"""
+    try:
+        # Create conversation lines
+        conversation_lines = []
+        for msg in message_chunk:
+            ts_str = msg["timestamp"].strftime("%Y-%m-%d %H:%M:%S") if hasattr(msg["timestamp"], 'strftime') else str(msg["timestamp"])
+            conversation_lines.append(
+                f"{msg['author']} (user_id: {msg['user_id']}) at {ts_str} said: {msg['content']}"
+            )
+        
+        text_message = "\n".join(conversation_lines)
+        embedding = generate_embedding(text_message)
+        
+        # Use timestamp of first message in chunk
+        earliest_ts = message_chunk[0]["timestamp"]
+        
+        chunk_doc = {
+            "server_id": str(server_id),
+            "channel_id": str(channel_id),
+            "text_message": text_message,
+            "embedding": list(embedding),
+            "timestamp": earliest_ts.isoformat() if hasattr(earliest_ts, 'isoformat') else str(earliest_ts),
+            "category": message_chunk[0]["category"],
+            "message_count": len(message_chunk),
+        }
+        
+        # Insert the chunk
+        response = supabase.table("message_chunks").insert(chunk_doc).execute()
+        if hasattr(response, "error") and response.error:
+            print(f"❌ Error inserting chunk: {response.error}")
+            return False
+        else:
+            print(f"✅ Stored chunk: {len(message_chunk)} messages from channel {channel_id}")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Error creating chunk from messages: {e}")
+        return False
