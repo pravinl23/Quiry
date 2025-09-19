@@ -1,0 +1,9 @@
+[package]
+name = "Quiry"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serenity = { version = "0.12", features = ["client", "gateway", "model"] }
+tokio = { version = "1", features = ["full"] }
+dotenv = "0.15" # optional, makes loading .env easy
