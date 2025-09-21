@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde_json::json;
 use tracing::{info, error};
-use crate::{config::Config, schema::MessageEvent};
+use crate::{config::Config, schema::{MessageEvent, QueryResult}};
 
 type DynErr = Box<dyn std::error::Error + Send + Sync>;
 
@@ -39,4 +39,55 @@ pub async fn upsert_to_pinecone(cfg: &Config, msg: &MessageEvent, embedding: Vec
 
     info!(msg_id=?msg.id, "Upserted to Pinecone");
     Ok(())
+}
+
+pub async fn query_pinecone(cfg: &Config, embedding: Vec<f32>, top_k: usize) -> Result<Vec<QueryResult>, DynErr> {
+    let url = format!("{}/query", cfg.pinecone_host);
+    let client = Client::new();
+
+    let res = client
+        .post(&url)
+        .header("Api-Key", &cfg.pinecone_key)
+        .json(&json!({
+            "namespace": cfg.namespace,
+            "vector": embedding,
+            "topK": top_k,
+            "includeMetadata": true,
+            "includeValues": false
+        }))
+        .send()
+        .await?;
+
+    let status = res.status();
+    let body: serde_json::Value = res.json().await?;
+
+    if !status.is_success() {
+        error!(status=?status, body=?body, "Pinecone query failed");
+        return Err(format!("Pinecone query error: {status}").into());
+    }
+
+    let empty_vec = vec![];
+    let matches = body["matches"].as_array().unwrap_or(&empty_vec);
+    let mut results = Vec::new();
+
+    for match_obj in matches {
+        let score = match_obj["score"].as_f64().unwrap_or(0.0);
+        let metadata = &match_obj["metadata"];
+
+        if let (Some(text), Some(author_id), Some(timestamp)) = (
+            metadata["text"].as_str(),
+            metadata["author_id"].as_str(),
+            metadata["timestamp"].as_str(),
+        ) {
+            results.push(QueryResult {
+                text: text.to_string(),
+                author_id: author_id.to_string(),
+                timestamp: timestamp.to_string(),
+                score,
+            });
+        }
+    }
+
+    info!(count = results.len(), "Found similar messages");
+    Ok(results)
 }

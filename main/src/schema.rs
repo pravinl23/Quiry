@@ -9,3 +9,11 @@ pub struct MessageEvent {
     pub timestamp: String,
     pub text: String,
 }
+
+#[derive(Debug, Clone)]
+pub struct QueryResult {
+    pub text: String,
+    pub author_id: String,
+    pub timestamp: String,
+    pub score: f64,
+}
