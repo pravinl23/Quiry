@@ -3,6 +3,7 @@ mod schema;
 mod cohere;
 mod pinecone;
 mod handler;
+mod chunking;
 
 use dotenv::dotenv;
 use serenity::prelude::*;
@@ -17,7 +18,7 @@ async fn main() {
     let cfg = Config::from_env();
 
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
-    let handler = Handler { cfg: cfg };
+    let handler = Handler::new(cfg);
 
     let mut client = Client::builder(&handler.cfg.discord_token, intents)
         .event_handler(handler)

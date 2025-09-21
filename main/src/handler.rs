@@ -6,15 +6,18 @@ use serenity::{
     all::{CreateInteractionResponse, CreateInteractionResponseMessage, CreateInteractionResponseFollowup, Interaction, CommandOptionType},
 };
 use tracing::{info, error};
+use tokio::sync::Mutex;
 use crate::{
     config::Config,
     schema::MessageEvent,
-    cohere::{get_embedding, generate_response},
-    pinecone::{upsert_to_pinecone, query_pinecone}
+    cohere::{get_embedding, generate_response, generate_response_from_chunks},
+    pinecone::{upsert_to_pinecone, query_pinecone, query_chunks_pinecone},
+    chunking::ChunkManager,
 };
 
 pub struct Handler {
     pub cfg: Config,
+    pub chunk_manager: Mutex<ChunkManager>,
 }
 
 #[async_trait]
@@ -103,23 +106,56 @@ impl EventHandler for Handler {
             text: msg.content.clone(),
         };
 
+        // Process message through chunking system
+        let mut chunk_manager = self.chunk_manager.lock().await;
+        if let Err(err) = chunk_manager.process_message(&self.cfg, event).await {
+            error!("Failed to process message through chunking: {err}");
+        }
+
+        // Keep individual message processing as fallback/compatibility
         match get_embedding(&self.cfg, &msg.content).await {
             Ok(embedding) => {
-                if let Err(err) = upsert_to_pinecone(&self.cfg, &event, embedding).await {
-                    error!("Failed to upsert: {err}");
+                let msg_event = MessageEvent {
+                    id: msg.id.to_string(),
+                    guild_id: msg.guild_id.map(|id| id.to_string()),
+                    channel_id: msg.channel_id.to_string(),
+                    author_id: msg.author.id.to_string(),
+                    timestamp: msg.timestamp.to_rfc3339().unwrap_or_else(|| "".to_string()),
+                    text: msg.content.clone(),
+                };
+                if let Err(err) = upsert_to_pinecone(&self.cfg, &msg_event, embedding).await {
+                    error!("Failed to upsert individual message: {err}");
                 }
             }
-            Err(err) => error!("Embedding failed: {err}"),
+            Err(err) => error!("Individual message embedding failed: {err}"),
         }
     }
 }
 
 impl Handler {
+    pub fn new(cfg: Config) -> Self {
+        Self {
+            cfg,
+            chunk_manager: Mutex::new(ChunkManager::new()),
+        }
+    }
+
     async fn handle_ask_command(&self, question: &str, guild_id: Option<String>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!("Getting embedding for question: {}", question);
         let question_embedding = get_embedding(&self.cfg, question).await?;
 
-        info!("Querying Pinecone for similar messages in guild: {:?}", guild_id);
+        // First try to query chunks
+        info!("Querying Pinecone for similar chunks in guild: {:?}", guild_id);
+        let similar_chunks = query_chunks_pinecone(&self.cfg, question_embedding.clone(), 3, guild_id.clone()).await?;
+
+        if !similar_chunks.is_empty() {
+            info!("Found {} similar chunks, generating response", similar_chunks.len());
+            let response = generate_response_from_chunks(&self.cfg, question, &similar_chunks).await?;
+            return Ok(response);
+        }
+
+        // Fallback to individual messages
+        info!("No chunks found, querying individual messages in guild: {:?}", guild_id);
         let similar_messages = query_pinecone(&self.cfg, question_embedding, 5, guild_id).await?;
 
         if similar_messages.is_empty() {
