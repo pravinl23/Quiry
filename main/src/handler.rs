@@ -1,6 +1,6 @@
 use serenity::{
     async_trait,
-    model::{channel::Message, gateway::Ready, id::GuildId},
+    model::{channel::Message, gateway::Ready},
     prelude::*,
     builder::{CreateCommand, CreateCommandOption},
     all::{CreateInteractionResponse, CreateInteractionResponseMessage, CreateInteractionResponseFollowup, Interaction, CommandOptionType},
@@ -22,13 +22,11 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
 
-        let guild_id = GuildId::new(1383876896420528179);
-
         let hello_cmd = CreateCommand::new("hello").description("Say hello to the bot");
-        if let Err(err) = guild_id.create_command(&ctx.http, hello_cmd).await {
-            error!("Failed to register /hello: {err:?}");
+        if let Err(err) = ctx.http.create_global_command(&hello_cmd).await {
+            error!("Failed to register global /hello: {err:?}");
         } else {
-            info!("Slash command /hello registered.");
+            info!("Global slash command /hello registered.");
         }
 
         let ask_cmd = CreateCommand::new("ask")
@@ -37,10 +35,10 @@ impl EventHandler for Handler {
                 CreateCommandOption::new(CommandOptionType::String, "question", "Your question")
                     .required(true)
             );
-        if let Err(err) = guild_id.create_command(&ctx.http, ask_cmd).await {
-            error!("Failed to register /ask: {err:?}");
+        if let Err(err) = ctx.http.create_global_command(&ask_cmd).await {
+            error!("Failed to register global /ask: {err:?}");
         } else {
-            info!("Slash command /ask registered.");
+            info!("Global slash command /ask registered.");
         }
     }
 
@@ -68,7 +66,8 @@ impl EventHandler for Handler {
                                 return;
                             }
 
-                            match self.handle_ask_command(question).await {
+                            let guild_id = command.guild_id.map(|id| id.to_string());
+                            match self.handle_ask_command(question, guild_id).await {
                                 Ok(response) => {
                                     let followup = CreateInteractionResponseFollowup::new().content(response);
                                     if let Err(err) = command.create_followup(&ctx.http, followup).await {
@@ -116,12 +115,12 @@ impl EventHandler for Handler {
 }
 
 impl Handler {
-    async fn handle_ask_command(&self, question: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_ask_command(&self, question: &str, guild_id: Option<String>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!("Getting embedding for question: {}", question);
         let question_embedding = get_embedding(&self.cfg, question).await?;
 
-        info!("Querying Pinecone for similar messages");
-        let similar_messages = query_pinecone(&self.cfg, question_embedding, 5).await?;
+        info!("Querying Pinecone for similar messages in guild: {:?}", guild_id);
+        let similar_messages = query_pinecone(&self.cfg, question_embedding, 5, guild_id).await?;
 
         if similar_messages.is_empty() {
             return Ok("I couldn't find any relevant messages in the history to answer your question.".to_string());

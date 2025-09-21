@@ -41,20 +41,34 @@ pub async fn upsert_to_pinecone(cfg: &Config, msg: &MessageEvent, embedding: Vec
     Ok(())
 }
 
-pub async fn query_pinecone(cfg: &Config, embedding: Vec<f32>, top_k: usize) -> Result<Vec<QueryResult>, DynErr> {
+pub async fn query_pinecone(cfg: &Config, embedding: Vec<f32>, top_k: usize, guild_id: Option<String>) -> Result<Vec<QueryResult>, DynErr> {
     let url = format!("{}/query", cfg.pinecone_host);
     let client = Client::new();
+
+    let mut query = json!({
+        "namespace": cfg.namespace,
+        "vector": embedding,
+        "topK": top_k,
+        "includeMetadata": true,
+        "includeValues": false
+    });
+
+    // Add guild_id filter if provided
+    if let Some(guild_id) = guild_id {
+        query["filter"] = json!({
+            "guild_id": {"$eq": guild_id}
+        });
+    } else {
+        // For DMs, filter for messages without guild_id (null values)
+        query["filter"] = json!({
+            "guild_id": {"$exists": false}
+        });
+    }
 
     let res = client
         .post(&url)
         .header("Api-Key", &cfg.pinecone_key)
-        .json(&json!({
-            "namespace": cfg.namespace,
-            "vector": embedding,
-            "topK": top_k,
-            "includeMetadata": true,
-            "includeValues": false
-        }))
+        .json(&query)
         .send()
         .await?;
 
