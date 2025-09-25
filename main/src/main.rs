@@ -1,14 +1,7 @@
-mod config;
-mod schema;
-mod cohere;
-mod pinecone;
-mod handler;
-mod chunking;
-
 use dotenv::dotenv;
 use serenity::prelude::*;
 use tracing_subscriber;
-use crate::{config::Config, handler::Handler};
+use Quiry::{config::Config, handler::Handler};
 
 #[tokio::main]
 async fn main() {
@@ -18,7 +11,7 @@ async fn main() {
     let cfg = Config::from_env();
 
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
-    let handler = Handler::new(cfg);
+    let handler = Handler::new(cfg).expect("Failed to create handler");
 
     let mut client = Client::builder(&handler.cfg.discord_token, intents)
         .event_handler(handler)

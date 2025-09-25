@@ -7,6 +7,8 @@ pub struct Config {
     pub pinecone_host: String,
     pub pinecone_index: String,
     pub namespace: String,
+    pub kafka_brokers: String,
+    pub kafka_group_id: String,
 }
 
 impl Config {
@@ -24,6 +26,10 @@ impl Config {
                 .expect("Expected PINECONE_INDEX in env"),
             namespace: env::var("PINECONE_NAMESPACE")
                 .unwrap_or_else(|_| "default".into()),
+            kafka_brokers: env::var("KAFKA_BROKERS")
+                .unwrap_or_else(|_| "localhost:9092".into()),
+            kafka_group_id: env::var("KAFKA_GROUP_ID")
+                .unwrap_or_else(|_| "quiry-bot".into()),
         }
     }
 }

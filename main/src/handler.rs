@@ -5,7 +5,7 @@ use serenity::{
     builder::{CreateCommand, CreateCommandOption},
     all::{CreateInteractionResponse, CreateInteractionResponseMessage, CreateInteractionResponseFollowup, Interaction, CommandOptionType},
 };
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tokio::sync::Mutex;
 use crate::{
     config::Config,
@@ -13,11 +13,14 @@ use crate::{
     cohere::{get_embedding, generate_response, generate_response_from_chunks},
     pinecone::{upsert_to_pinecone, query_pinecone, query_chunks_pinecone},
     chunking::ChunkManager,
+    kafka_producer::KafkaProducer,
+    kafka_types::KafkaMessage,
 };
 
 pub struct Handler {
     pub cfg: Config,
     pub chunk_manager: Mutex<ChunkManager>,
+    pub kafka_producer: Option<KafkaProducer>,
 }
 
 #[async_trait]
@@ -106,37 +109,58 @@ impl EventHandler for Handler {
             text: msg.content.clone(),
         };
 
-        // Process message through chunking system
-        let mut chunk_manager = self.chunk_manager.lock().await;
-        if let Err(err) = chunk_manager.process_message(&self.cfg, event).await {
-            error!("Failed to process message through chunking: {err}");
-        }
-
-        // Keep individual message processing as fallback/compatibility
-        match get_embedding(&self.cfg, &msg.content).await {
-            Ok(embedding) => {
-                let msg_event = MessageEvent {
-                    id: msg.id.to_string(),
-                    guild_id: msg.guild_id.map(|id| id.to_string()),
-                    channel_id: msg.channel_id.to_string(),
-                    author_id: msg.author.id.to_string(),
-                    timestamp: msg.timestamp.to_rfc3339().unwrap_or_else(|| "".to_string()),
-                    text: msg.content.clone(),
-                };
-                if let Err(err) = upsert_to_pinecone(&self.cfg, &msg_event, embedding).await {
-                    error!("Failed to upsert individual message: {err}");
-                }
+        // Try to send to Kafka if available, otherwise process directly
+        if let Some(ref producer) = self.kafka_producer {
+            let kafka_message = KafkaMessage::new_discord_message(event.clone());
+            if let Err(err) = producer.send_discord_message(kafka_message).await {
+                error!("Failed to send message to Kafka: {err}");
+                // Fallback to direct processing
+                self.process_message_directly(event).await;
             }
-            Err(err) => error!("Individual message embedding failed: {err}"),
+        } else {
+            // Process directly without Kafka
+            info!("Processing message directly (Kafka not available): {}", event.text);
+            self.process_message_directly(event).await;
         }
     }
 }
 
 impl Handler {
-    pub fn new(cfg: Config) -> Self {
-        Self {
+    pub fn new(cfg: Config) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Try to create Kafka producer, but don't fail if Kafka is not available
+        let kafka_producer = match KafkaProducer::new(&cfg) {
+            Ok(producer) => {
+                info!("Kafka producer initialized successfully");
+                Some(producer)
+            }
+            Err(err) => {
+                warn!("Failed to initialize Kafka producer: {}. Running in fallback mode.", err);
+                None
+            }
+        };
+        
+        Ok(Self {
             cfg,
             chunk_manager: Mutex::new(ChunkManager::new()),
+            kafka_producer,
+        })
+    }
+
+    async fn process_message_directly(&self, event: MessageEvent) {
+        // Process message through chunking system
+        let mut chunk_manager = self.chunk_manager.lock().await;
+        if let Err(err) = chunk_manager.process_message(&self.cfg, event.clone()).await {
+            error!("Failed to process message through chunking: {err}");
+        }
+
+        // Keep individual message processing as fallback/compatibility
+        match get_embedding(&self.cfg, &event.text).await {
+            Ok(embedding) => {
+                if let Err(err) = upsert_to_pinecone(&self.cfg, &event, embedding).await {
+                    error!("Failed to upsert individual message: {err}");
+                }
+            }
+            Err(err) => error!("Individual message embedding failed: {err}"),
         }
     }
 
