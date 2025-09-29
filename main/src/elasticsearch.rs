@@ -1,6 +1,4 @@
-use elasticsearch::{Elasticsearch, IndexParts, SearchParts, DeleteParts};
-use elasticsearch::http::transport::{Transport, TransportBuilder};
-use elasticsearch::indices::{IndicesCreateParts, IndicesExistsParts};
+use reqwest::Client;
 use serde_json::{json, Value};
 use tracing::{info, error, warn};
 use crate::{config::Config, schema::MessageEvent};
@@ -8,7 +6,8 @@ use crate::{config::Config, schema::MessageEvent};
 type DynErr = Box<dyn std::error::Error + Send + Sync>;
 
 pub struct ElasticsearchClient {
-    client: Elasticsearch,
+    client: Client,
+    base_url: String,
     index_name: String,
 }
 
@@ -24,15 +23,14 @@ pub struct ESQueryResult {
 
 impl ElasticsearchClient {
     pub async fn new(cfg: &Config) -> Result<Self, DynErr> {
-        let transport = TransportBuilder::new()
-            .url(&cfg.elasticsearch_url)?
-            .build()?;
-        
-        let client = Elasticsearch::new(transport);
+        let client = Client::new();
+        let base_url = cfg.elasticsearch_url.clone();
+        let index_name = cfg.elasticsearch_index.clone();
         
         let es_client = Self {
             client,
-            index_name: cfg.elasticsearch_index.clone(),
+            base_url,
+            index_name,
         };
         
         // Create index with proper mappings
@@ -42,79 +40,86 @@ impl ElasticsearchClient {
     }
 
     async fn create_index(&self) -> Result<(), DynErr> {
-        let index_exists = self.client
-            .indices()
-            .exists(IndicesExistsParts::Index(&[&self.index_name]))
-            .send()
-            .await?;
-
-        if !index_exists.status_code().is_success() {
-            info!("Creating ElasticSearch index: {}", self.index_name);
-            
-            let body = json!({
-                "mappings": {
-                    "properties": {
-                        "message_id": {
-                            "type": "keyword"
-                        },
-                        "guild_id": {
-                            "type": "keyword"
-                        },
-                        "channel_id": {
-                            "type": "keyword"
-                        },
-                        "author_id": {
-                            "type": "keyword"
-                        },
-                        "text": {
-                            "type": "text",
-                            "analyzer": "standard",
-                            "fields": {
-                                "raw": {
-                                    "type": "keyword"
-                                }
+        let url = format!("{}/{}", self.base_url, self.index_name);
+        
+        // Check if index exists
+        let response = self.client.head(&url).send().await?;
+        
+        if response.status().is_success() {
+            info!("ElasticSearch index already exists");
+            return Ok(());
+        }
+        
+        info!("Creating ElasticSearch index: {}", self.index_name);
+        
+        let body = json!({
+            "mappings": {
+                "properties": {
+                    "message_id": {
+                        "type": "keyword"
+                    },
+                    "guild_id": {
+                        "type": "keyword"
+                    },
+                    "channel_id": {
+                        "type": "keyword"
+                    },
+                    "author_id": {
+                        "type": "keyword"
+                    },
+                    "text": {
+                        "type": "text",
+                        "analyzer": "standard",
+                        "fields": {
+                            "raw": {
+                                "type": "keyword"
                             }
-                        },
-                        "timestamp": {
-                            "type": "date",
-                            "format": "strict_date_optional_time||epoch_millis"
-                        },
-                        "created_at": {
-                            "type": "date",
-                            "format": "strict_date_optional_time||epoch_millis"
                         }
+                    },
+                    "timestamp": {
+                        "type": "date",
+                        "format": "strict_date_optional_time||epoch_millis"
+                    },
+                    "created_at": {
+                        "type": "date",
+                        "format": "strict_date_optional_time||epoch_millis"
                     }
-                },
-                "settings": {
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0,
-                    "analysis": {
-                        "analyzer": {
-                            "standard": {
-                                "type": "standard",
-                                "stopwords": "_english_"
-                            }
+                }
+            },
+            "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 0,
+                "analysis": {
+                    "analyzer": {
+                        "standard": {
+                            "type": "standard",
+                            "stopwords": "_english_"
                         }
                     }
                 }
-            });
+            }
+        });
 
-            self.client
-                .indices()
-                .create(IndicesCreateParts::Index(&self.index_name))
-                .body(body)
-                .send()
-                .await?;
+        let response = self.client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await?;
 
+        if response.status().is_success() {
             info!("ElasticSearch index created successfully");
         } else {
-            info!("ElasticSearch index already exists");
+            let error_text = response.text().await?;
+            error!("Failed to create index: {}", error_text);
+            return Err("Failed to create ElasticSearch index".into());
         }
 
         Ok(())
     }
 
     pub async fn index_message(&self, message: &MessageEvent) -> Result<(), DynErr> {
+        let url = format!("{}/{}/_doc/{}", self.base_url, self.index_name, message.id);
+        
         let doc = json!({
             "message_id": message.id,
             "guild_id": message.guild_id,
@@ -126,30 +131,36 @@ impl ElasticsearchClient {
         });
 
         let response = self.client
-            .index(IndexParts::IndexId(&self.index_name, &message.id))
-            .body(doc)
+            .put(&url)
+            .json(&doc)
             .send()
             .await?;
 
-        if response.status_code().is_success() {
+        if response.status().is_success() {
             info!(message_id = %message.id, "Indexed message to ElasticSearch");
         } else {
-            error!(message_id = %message.id, "Failed to index message to ElasticSearch");
+            let error_text = response.text().await?;
+            error!(message_id = %message.id, "Failed to index message to ElasticSearch: {}", error_text);
         }
 
         Ok(())
     }
 
     pub async fn delete_message(&self, message_id: &str) -> Result<(), DynErr> {
+        let url = format!("{}/{}/_doc/{}", self.base_url, self.index_name, message_id);
+        
         let response = self.client
-            .delete(DeleteParts::IndexId(&self.index_name, message_id))
+            .delete(&url)
             .send()
             .await?;
 
-        if response.status_code().is_success() {
+        if response.status().is_success() {
             info!(message_id = %message_id, "Deleted message from ElasticSearch");
-        } else {
+        } else if response.status().as_u16() == 404 {
             warn!(message_id = %message_id, "Message not found in ElasticSearch for deletion");
+        } else {
+            let error_text = response.text().await?;
+            error!(message_id = %message_id, "Failed to delete message: {}", error_text);
         }
 
         Ok(())
@@ -163,6 +174,8 @@ impl ElasticsearchClient {
         author_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<ESQueryResult>, DynErr> {
+        let url = format!("{}/{}/_search", self.base_url, self.index_name);
+        
         let mut must_clauses = vec![
             json!({
                 "multi_match": {
@@ -213,17 +226,19 @@ impl ElasticsearchClient {
         });
 
         let response = self.client
-            .search(SearchParts::Index(&[&self.index_name]))
-            .body(search_body)
+            .post(&url)
+            .json(&search_body)
             .send()
             .await?;
 
-        if !response.status_code().is_success() {
-            return Err("ElasticSearch search failed".into());
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(format!("ElasticSearch search failed: {}", error_text).into());
         }
 
         let response_body: Value = response.json().await?;
-        let hits = response_body["hits"]["hits"].as_array().unwrap_or(&vec![]);
+        let empty_vec = vec![];
+        let hits = response_body["hits"]["hits"].as_array().unwrap_or(&empty_vec);
 
         let mut results = Vec::new();
         for hit in hits {
@@ -252,13 +267,13 @@ impl ElasticsearchClient {
     }
 
     pub async fn health_check(&self) -> Result<bool, DynErr> {
+        let url = format!("{}/_cluster/health", self.base_url);
+        
         let response = self.client
-            .cluster()
-            .health()
+            .get(&url)
             .send()
             .await?;
 
-        Ok(response.status_code().is_success())
+        Ok(response.status().is_success())
     }
 }
-

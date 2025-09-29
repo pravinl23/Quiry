@@ -41,6 +41,7 @@ impl KafkaConsumer {
         Ok(())
     }
 
+
     pub async fn start_consuming(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("Starting Kafka consumer...");
 

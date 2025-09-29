@@ -126,7 +126,6 @@ impl EventHandler for Handler {
                             }
                         }
                     }
-                    }
                 }
                 _ => {}
             }
@@ -183,7 +182,7 @@ impl Handler {
         })
     }
 
-    async fn initialize_es_client(&self) -> Option<ElasticsearchClient> {
+    pub async fn initialize_es_client(&self) -> Option<ElasticsearchClient> {
         match ElasticsearchClient::new(&self.cfg).await {
             Ok(client) => {
                 info!("ElasticSearch client initialized successfully");
@@ -205,15 +204,12 @@ impl Handler {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Get Pinecone results (semantic search)
         let pinecone_results = if let Some(guild_id) = guild_id {
-            let embedding = get_embedding(query, &self.cfg.cohere_key).await?;
+            let embedding = get_embedding(&self.cfg, query).await?;
             query_chunks_pinecone(
-                &embedding,
-                guild_id,
-                &self.cfg.pinecone_key,
-                &self.cfg.pinecone_host,
-                &self.cfg.pinecone_index,
-                &self.cfg.namespace,
+                &self.cfg,
+                embedding,
                 5,
+                Some(guild_id.to_string()),
             ).await?
         } else {
             vec![]
@@ -234,16 +230,25 @@ impl Handler {
         }
 
         // Generate response from combined results
-        let context_texts: Vec<String> = combined_results.iter()
-            .map(|result| format!("[{}] {}: {}", result.timestamp, result.author_id, result.text))
+        let context_chunks: Vec<crate::schema::ChunkQueryResult> = combined_results.iter()
+            .map(|result| crate::schema::ChunkQueryResult {
+                chunk_id: result.text.clone(),
+                text: result.text.clone(),
+                summary: None,
+                authors: vec![result.author_id.clone()],
+                message_count: 1,
+                first_timestamp: result.timestamp.clone(),
+                last_timestamp: result.timestamp.clone(),
+                score: result.score,
+            })
             .collect();
 
-        generate_response_from_chunks(query, &context_texts, &self.cfg.cohere_key).await
+        generate_response_from_chunks(&self.cfg, query, &context_chunks).await
     }
 
     async fn merge_search_results(
         &self,
-        pinecone_results: Vec<crate::pinecone::PineconeQueryResult>,
+        pinecone_results: Vec<crate::schema::ChunkQueryResult>,
         es_results: Vec<crate::elasticsearch::ESQueryResult>,
         alpha: f64,
     ) -> Result<Vec<crate::elasticsearch::ESQueryResult>, Box<dyn std::error::Error + Send + Sync>> {
@@ -257,15 +262,15 @@ impl Handler {
             let final_score = alpha * normalized_score;
             
             let es_result = crate::elasticsearch::ESQueryResult {
-                text: result.text,
-                author_id: result.author_id,
-                channel_id: result.channel_id,
-                timestamp: result.timestamp,
-                guild_id: result.guild_id,
+                text: result.text.clone(),
+                author_id: result.authors.first().unwrap_or(&"unknown".to_string()).clone(),
+                channel_id: "unknown".to_string(), // ChunkQueryResult doesn't have channel_id
+                timestamp: result.first_timestamp.clone(),
+                guild_id: None, // ChunkQueryResult doesn't have guild_id
                 score: final_score,
             };
             
-            combined_scores.insert(result.id, (final_score, es_result));
+            combined_scores.insert(result.chunk_id, (final_score, es_result));
         }
         
         // Add ElasticSearch results
@@ -323,7 +328,7 @@ impl Handler {
         }
 
         // Use hybrid search if ES is available, otherwise fallback to Pinecone-only
-        if let Some(ref es_client) = self.es_client {
+        if let Some(ref _es_client) = self.es_client {
             self.hybrid_search(
                 question,
                 guild_id.as_deref(),
