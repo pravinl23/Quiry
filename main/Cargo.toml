@@ -21,3 +21,15 @@ chrono = { version = "0.4", features = ["serde"] }
 # Kafka dependencies
 rdkafka = { version = "0.36", features = ["cmake-build", "ssl-vendored"] }
 futures = "0.3"
+
+# ElasticSearch dependencies
+elasticsearch = { version = "9.1.0-alpha.1", features = ["rustls-tls"] }
+
+[[bin]]
+name = "consumer"
+path = "src/bin/consumer.rs"
+
+[[bin]]
+name = "indexer"
+path = "src/bin/indexer.rs"
+

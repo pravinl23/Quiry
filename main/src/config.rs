@@ -9,6 +9,8 @@ pub struct Config {
     pub namespace: String,
     pub kafka_brokers: String,
     pub kafka_group_id: String,
+    pub elasticsearch_url: String,
+    pub elasticsearch_index: String,
 }
 
 impl Config {
@@ -30,6 +32,10 @@ impl Config {
                 .unwrap_or_else(|_| "localhost:9092".into()),
             kafka_group_id: env::var("KAFKA_GROUP_ID")
                 .unwrap_or_else(|_| "quiry-bot".into()),
+            elasticsearch_url: env::var("ELASTICSEARCH_URL")
+                .unwrap_or_else(|_| "http://localhost:9200".into()),
+            elasticsearch_index: env::var("ELASTICSEARCH_INDEX")
+                .unwrap_or_else(|_| "discord-messages".into()),
         }
     }
 }

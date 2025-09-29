@@ -7,3 +7,4 @@ pub mod chunking;
 pub mod kafka_types;
 pub mod kafka_producer;
 pub mod kafka_consumer;
+pub mod elasticsearch;

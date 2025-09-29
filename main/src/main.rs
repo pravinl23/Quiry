@@ -11,7 +11,12 @@ async fn main() {
     let cfg = Config::from_env();
 
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
-    let handler = Handler::new(cfg).expect("Failed to create handler");
+    let mut handler = Handler::new(cfg).expect("Failed to create handler");
+    
+    // Initialize ElasticSearch client asynchronously
+    if let Some(es_client) = handler.initialize_es_client().await {
+        handler.es_client = Some(es_client);
+    }
 
     let mut client = Client::builder(&handler.cfg.discord_token, intents)
         .event_handler(handler)
