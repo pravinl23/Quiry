@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: 'quiry-dashboards'
+    orgId: 1
+    folder: 'Quiry'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+
