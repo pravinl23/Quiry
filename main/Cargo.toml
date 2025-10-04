@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 serenity = { version = "0.12", features = ["framework", "standard_framework", "client", "gateway", "rustls_backend"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 dotenv = "0.15"
 
@@ -25,6 +25,11 @@ futures = "0.3"
 # ElasticSearch dependencies
 # Using reqwest for simple HTTP requests to ElasticSearch
 
+# Metrics and observability
+prometheus = "0.13"
+lazy_static = "1.4"
+warp = "0.3"
+
 [[bin]]
 name = "consumer"
 path = "src/bin/consumer.rs"
@@ -32,4 +37,8 @@ path = "src/bin/consumer.rs"
 [[bin]]
 name = "indexer"
 path = "src/bin/indexer.rs"
+
+[[bin]]
+name = "metrics_server"
+path = "src/bin/metrics_server.rs"
 

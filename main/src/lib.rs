@@ -8,3 +8,5 @@ pub mod kafka_types;
 pub mod kafka_producer;
 pub mod kafka_consumer;
 pub mod elasticsearch;
+pub mod metrics;
+pub mod health;
