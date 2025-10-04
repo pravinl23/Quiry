@@ -8,6 +8,7 @@ use crate::{
     cohere::{get_embedding, generate_response, generate_response_from_chunks},
     pinecone::{upsert_to_pinecone, query_pinecone, query_chunks_pinecone},
     chunking::ChunkManager,
+    metrics::{KAFKA_MESSAGES_RECEIVED, MESSAGES_PROCESSED, MESSAGES_FAILED},
 };
 
 pub struct KafkaConsumer {
@@ -22,10 +23,12 @@ impl KafkaConsumer {
             .set("group.id", &cfg.kafka_group_id)
             .set("bootstrap.servers", &cfg.kafka_brokers)
             .set("enable.partition.eof", "false")
-            .set("session.timeout.ms", "6000")
+            .set("session.timeout.ms", "30000")
             .set("enable.auto.commit", "true")
-            .set("auto.commit.interval.ms", "1000")
+            .set("auto.commit.interval.ms", "5000")
             .set("auto.offset.reset", "earliest")
+            .set("max.poll.interval.ms", "600000") // 10 minutes
+            .set("heartbeat.interval.ms", "10000") // 10 seconds
             .create()?;
 
         Ok(Self {
@@ -65,11 +68,14 @@ impl KafkaConsumer {
                 }
             };
             
+            KAFKA_MESSAGES_RECEIVED.inc();
             match self.process_message(&payload).await {
                 Ok(_) => {
+                    MESSAGES_PROCESSED.inc();
                     debug!(topic = %topic, partition = partition, offset = offset, "Processed message successfully");
                 }
                 Err(err) => {
+                    MESSAGES_FAILED.inc();
                     error!(error = %err, topic = %topic, "Failed to process message");
                 }
             }

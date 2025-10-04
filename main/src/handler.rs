@@ -16,6 +16,7 @@ use crate::{
     kafka_producer::KafkaProducer,
     kafka_types::KafkaMessage,
     elasticsearch::ElasticsearchClient,
+    metrics::{MESSAGES_PROCESSED, MESSAGES_FAILED, MESSAGE_PROCESSING_DURATION, SEARCH_REQUESTS, SEARCH_DURATION},
 };
 
 pub struct Handler {
@@ -135,22 +136,38 @@ impl EventHandler for Handler {
     async fn message(&self, _ctx: Context, msg: Message) {
         if msg.author.bot { return; }
 
+        let _timer = MESSAGE_PROCESSING_DURATION.start_timer();
+        let correlation_id = uuid::Uuid::new_v4().to_string();
+        let guild_id = msg.guild_id.map(|id| id.to_string());
+        
         let event = MessageEvent {
             id: msg.id.to_string(),
-            guild_id: msg.guild_id.map(|id| id.to_string()),
+            guild_id: guild_id.clone(),
             channel_id: msg.channel_id.to_string(),
             author_id: msg.author.id.to_string(),
             timestamp: msg.timestamp.to_rfc3339().unwrap_or_else(|| "".to_string()),
             text: msg.content.clone(),
         };
 
+        info!(
+            correlation_id = %correlation_id,
+            guild_id = ?guild_id,
+            message_id = %event.id,
+            channel_id = %event.channel_id,
+            author_id = %event.author_id,
+            "Processing Discord message"
+        );
+
         // Try to send to Kafka if available, otherwise process directly
         if let Some(ref producer) = self.kafka_producer {
             let kafka_message = KafkaMessage::new_discord_message(event.clone());
             if let Err(err) = producer.send_discord_message(kafka_message).await {
                 error!("Failed to send message to Kafka: {err}");
+                MESSAGES_FAILED.inc();
                 // Fallback to direct processing
                 self.process_message_directly(event).await;
+            } else {
+                MESSAGES_PROCESSED.inc();
             }
         } else {
             // Process directly without Kafka
@@ -202,6 +219,8 @@ impl Handler {
         channel_id: Option<&str>,
         author_id: Option<&str>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let _timer = SEARCH_DURATION.start_timer();
+        SEARCH_REQUESTS.inc();
         // Get Pinecone results (semantic search)
         let pinecone_results = if let Some(guild_id) = guild_id {
             let embedding = get_embedding(&self.cfg, query).await?;
@@ -342,6 +361,8 @@ impl Handler {
     }
 
     async fn handle_ask_command(&self, question: &str, guild_id: Option<String>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let _timer = SEARCH_DURATION.start_timer();
+        SEARCH_REQUESTS.inc();
         info!("Getting embedding for question: {}", question);
         let question_embedding = get_embedding(&self.cfg, question).await?;
 

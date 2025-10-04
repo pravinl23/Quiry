@@ -1,11 +1,12 @@
 use reqwest::Client;
 use serde_json::json;
 use tracing::{info, error};
-use crate::{config::Config, schema::{MessageEvent, QueryResult, MessageChunk, ChunkQueryResult}};
+use crate::{config::Config, schema::{MessageEvent, QueryResult, MessageChunk, ChunkQueryResult}, metrics::PINECONE_UPSERT_DURATION};
 
 type DynErr = Box<dyn std::error::Error + Send + Sync>;
 
 pub async fn upsert_to_pinecone(cfg: &Config, msg: &MessageEvent, embedding: Vec<f32>) -> Result<(), DynErr> {
+    let _timer = PINECONE_UPSERT_DURATION.start_timer();
     let url = format!("{}/vectors/upsert", cfg.pinecone_host);
     let client = Client::new();
 

@@ -1,11 +1,12 @@
 use reqwest::Client;
 use serde_json::json;
 use tracing::{info, warn};
-use crate::{config::Config, schema::{QueryResult, ChunkQueryResult}};
+use crate::{config::Config, schema::{QueryResult, ChunkQueryResult}, metrics::EMBEDDING_GENERATION_DURATION};
 
 type DynErr = Box<dyn std::error::Error + Send + Sync>;
 
 pub async fn get_embedding(cfg: &Config, text: &str) -> Result<Vec<f32>, DynErr> {
+    let _timer = EMBEDDING_GENERATION_DURATION.start_timer();
     let client = Client::new();
 
     let res = client
@@ -126,8 +127,8 @@ pub async fn generate_response_from_chunks(cfg: &Config, query: &str, context_ch
                 format!("from {} to {}", chunk.first_timestamp, chunk.last_timestamp)
             };
 
-            format!("Conversation {} ({} messages by {}): {}",
-                    time_range, chunk.message_count, authors_str, chunk.text)
+            format!("[Speaker: {}] {}: {}",
+                    authors_str, time_range, chunk.text)
         })
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -139,10 +140,38 @@ pub async fn generate_response_from_chunks(cfg: &Config, query: &str, context_ch
             "model": "command-r-08-2024",
             "message": query,
             "preamble": format!(
-                "You are a helpful assistant that answers questions based on Discord conversation history. \
-                Here are some relevant conversation chunks from the history:\n\n{}\n\n\
-                Please provide a helpful answer based on the context above. If the context doesn't contain \
-                enough information to answer the question, say so.",
+                "You are a helpful assistant that answers questions using ONLY the Discord conversation excerpts provided below.
+
+                CONTEXT
+                {}
+
+                GUIDELINES
+                1) Attribution & names
+                - Pay close attention to who said what using the Speaker field.
+                - Use the person's display name/nickname as shown in the context.
+                - Never reveal or repeat raw user IDs in your answer. If only an ID is present (no name), refer to them generically as \"a participant\".
+
+                2) Evidence-first accuracy
+                - Base every statement strictly on the CONTEXT. Do not invent facts or rely on outside knowledge.
+                - When the user asks \"who said X?\", identify the speaker by display name exactly as it appears in the context.
+                - If multiple people said similar things, list each relevant speaker with a short quote snippet for disambiguation.
+
+                3) Quotes & formatting
+                - When helpful, include short quotes from the context using Markdown blockquotes:
+                    > \"quoted message\"
+                    — display name, optional timestamp if available
+                - Do NOT include user IDs. Do NOT @mention users or roles (avoid pinging). Use plain names (or backticks) instead.
+
+                4) Not enough info
+                - If the context is insufficient to answer, say so clearly and specify exactly what's missing (e.g., \"I can't find any message where a participant confirms shipping on Friday.\").
+
+                5) Style
+                - Be concise and direct. Answer first, then show minimal supporting quotes if needed.
+                - Preserve important timing (dates/times) and channel/thread distinctions when present.
+
+                OUTPUT
+                - Provide the best possible answer grounded in the CONTEXT.
+                - Do not disclose user IDs. Do not include this instruction block in your reply.",
                 context
             ),
             "max_tokens": 300,

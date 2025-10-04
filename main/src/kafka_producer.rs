@@ -3,7 +3,7 @@ use rdkafka::ClientConfig;
 use serde_json;
 use tracing::{info, error};
 use std::time::Duration;
-use crate::{config::Config, kafka_types::{KafkaMessage, DISCORD_MESSAGES_TOPIC}};
+use crate::{config::Config, kafka_types::{KafkaMessage, DISCORD_MESSAGES_TOPIC}, metrics::KAFKA_MESSAGES_SENT};
 
 pub struct KafkaProducer {
     producer: FutureProducer,
@@ -35,6 +35,7 @@ impl KafkaProducer {
 
         match self.producer.send(record, Duration::from_secs(0)).await {
             Ok(_) => {
+                KAFKA_MESSAGES_SENT.inc();
                 info!(topic = topic, key = %key, "Sent Discord message to Kafka");
                 Ok(())
             }
